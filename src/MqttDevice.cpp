@@ -64,12 +64,13 @@ void MqttDevice::setDebug(bool enable) { debug = enable; }
 void MqttDevice::begin(const char* wifi_ssid, const char* wifi_pass,
                        const char* mqtt_host, int mqtt_port,
                        const char* mqtt_user, const char* mqtt_pass,
-                       const char* willTopic, const char* willPayload, bool willRetain, int willQos)
+                       const char* willTopic, const char* willPayload, bool willRetain, int willQos, int mqttKeepAliveSeconds)
 {
   _ssid = wifi_ssid;
   _pass = wifi_pass;
   _mqttHost = mqtt_host;
   _mqttPort = mqtt_port;
+  this->mqttKeepAliveSeconds = mqttKeepAliveSeconds;
 
   if (mqtt_user)
   {

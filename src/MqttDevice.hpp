@@ -27,7 +27,7 @@ public:
     void begin(const char* wifi_ssid, const char* wifi_pass,
                const char* mqtt_host, int mqtt_port,
                const char* mqtt_user = nullptr, const char* mqtt_pass = nullptr,
-               const char* willTopic = nullptr, const char* willPayload = nullptr, bool willRetain = true, int willQos = 0);
+               const char* willTopic = nullptr, const char* willPayload = nullptr, bool willRetain = true, int willQos = 0, int mqttKeepAliveSeconds = 15);
 
     String getDeviceId();
 
