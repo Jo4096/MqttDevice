@@ -8,7 +8,7 @@ const char* MQTT_USER = nullptr;
 const char* MQTT_PASSWORD = nullptr;
 
 
-MqttDevice device("himberee");
+MqttDevice device("himbeere");
 
 // ---------------------- Handlers ----------------------
 void on_LastWill(const char* topic, const char* payload)
