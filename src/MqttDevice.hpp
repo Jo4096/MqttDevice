@@ -35,7 +35,7 @@ public:
     void publish(const char* fullTopic, const char* data, bool retain = false);
     void publishJson(const char* fullTopic, const JsonDocument& doc, bool retain = false);
     
-    // NOVO (Com Prefixo): Publica no tópico prefixado pelo ID do dispositivo
+    // (Com Prefixo): Publica no tópico prefixado pelo ID do dispositivo
     void publishSubTopic(const char* subTopic, const char* data, bool retain = false);
     void publishJsonSubTopic(const char* subTopic, const JsonDocument& doc, bool retain = false);
     
@@ -119,7 +119,7 @@ private:
     static void globalMqttCallback(char* topic, byte* payload, unsigned int length);
     void handleMessage(const char* topic, byte* payload, unsigned int length);
 
-    void checkPendingRequests(); // Novo: Para gestão de timeouts e limpeza
+    void checkPendingRequests();
 
     bool wifiConnectOnce();
     bool ensureWiFi();
