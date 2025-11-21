@@ -9,7 +9,7 @@ const char* MQTT_USER = nullptr;
 const char* MQTT_PASSWORD = nullptr;
 
 
-MqttDevice device("himberee");
+MqttDevice device("himbeere");
 
 //------------------------------------- Handlers -------------------------------------//
 
