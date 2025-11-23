@@ -34,10 +34,11 @@ public:
     // Métodos de Envio
     void publish(const char* fullTopic, const char* data, bool retain = false);
     void publishJson(const char* fullTopic, const JsonDocument& doc, bool retain = false);
+    void publishBinary(const char* fullTopic, const uint8_t* data, unsigned int length, bool retain = false);
     
-    // (Com Prefixo): Publica no tópico prefixado pelo ID do dispositivo
     void publishSubTopic(const char* subTopic, const char* data, bool retain = false);
     void publishJsonSubTopic(const char* subTopic, const JsonDocument& doc, bool retain = false);
+    void publishBinarySubTopic(const char* subTopic, const uint8_t* data, unsigned int length, bool retain = false);
     
     // Request/Response - Com Timeout
     void request(const char* targetSubTopic, const JsonDocument& requestDoc, 
@@ -47,6 +48,7 @@ public:
     // Métodos de Receção (Subscrição)
     void on(const char* subTopic, std::function<void(const char* topic, const char* payload)> call_back);
     void onJson(const char* subTopic, std::function<void(const char* topic, const JsonDocument& doc)> call_back);
+    void onBinary(const char* subTopic, std::function<void(const char* topic, const uint8_t* payload, unsigned int length)> call_back);
 
     // Novo: Callback para Eventos de Conexão
     void onConnectionChange(MqttConnectionCallback cb);
@@ -109,8 +111,14 @@ private:
         bool completed = false; // Se a resposta foi recebida
     };
 
+    struct BinaryCallback {
+      String topic;
+      std::function<void(const char* topic, const uint8_t* payload, unsigned int length)> fn;
+    };
+
     std::vector<TextCallback> textCallbacks;
     std::vector<JsonCallback> jsonCallbacks;
+    std::vector<BinaryCallback> binaryCallbacks;
     std::vector<RequestState> pendingRequests;
     MqttConnectionCallback connectionCallback = nullptr; // Callback de conexão
 
@@ -119,7 +127,7 @@ private:
     static void globalMqttCallback(char* topic, byte* payload, unsigned int length);
     void handleMessage(const char* topic, byte* payload, unsigned int length);
 
-    void checkPendingRequests();
+    void checkPendingRequests(); // Novo: Para gestão de timeouts e limpeza
 
     bool wifiConnectOnce();
     bool ensureWiFi();

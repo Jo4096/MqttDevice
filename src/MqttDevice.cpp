@@ -1,14 +1,16 @@
 #include "MqttDevice.hpp"
 #include <stdarg.h>
 
-MqttDevice* MqttDevice::instance = nullptr;
+MqttDevice *MqttDevice::instance = nullptr;
 
 MqttDevice::MqttDevice() : MqttDevice("") {}
 
 MqttDevice::MqttDevice(String id)
 {
-  if (id == "") this->device_id = generateUniqueId();
-  else this->device_id = id;
+  if (id == "")
+    this->device_id = generateUniqueId();
+  else
+    this->device_id = id;
 
   this->lastReconnectAttempt = 0;
   this->lastWiFiAttempt = 0;
@@ -19,9 +21,10 @@ MqttDevice::MqttDevice(String id)
 }
 
 // ---------------------- Utilities ----------------------
-void MqttDevice::log(const char* fmt, ...)
+void MqttDevice::log(const char *fmt, ...)
 {
-  if (!debug) return;
+  if (!debug)
+    return;
   char buf[256];
   va_list args;
   va_start(args, fmt);
@@ -37,15 +40,16 @@ String MqttDevice::generateUniqueId()
 #if defined(ESP32)
   uint64_t mac = ESP.getEfuseMac();
   // Usar os 4 bytes mais baixos (8 caracteres HEX) para um ID conciso
-  uid += String((uint32_t)mac, HEX); 
+  uid += String((uint32_t)mac, HEX);
 #elif defined(ESP8266)
   uid += String(ESP.getChipId(), HEX);
 #elif defined(ARDUINO_ARCH_RP2040)
   uint8_t macArr[6];
   WiFi.macAddress(macArr);
-  for (int i = 3; i < 6; ++i) 
+  for (int i = 3; i < 6; ++i)
   {
-    if (macArr[i] < 16) uid += "0";
+    if (macArr[i] < 16)
+      uid += "0";
     uid += String(macArr[i], HEX);
   }
   if (uid == "dev_000000")
@@ -61,10 +65,10 @@ String MqttDevice::generateUniqueId()
 // ---------------------- Begin & WiFi ----------------------
 void MqttDevice::setDebug(bool enable) { debug = enable; }
 
-void MqttDevice::begin(const char* wifi_ssid, const char* wifi_pass,
-                       const char* mqtt_host, int mqtt_port,
-                       const char* mqtt_user, const char* mqtt_pass,
-                       const char* willTopic, const char* willPayload, bool willRetain, int willQos, int mqttKeepAliveSeconds)
+void MqttDevice::begin(const char *wifi_ssid, const char *wifi_pass,
+                       const char *mqtt_host, int mqtt_port,
+                       const char *mqtt_user, const char *mqtt_pass,
+                       const char *willTopic, const char *willPayload, bool willRetain, int willQos, int mqttKeepAliveSeconds)
 {
   _ssid = wifi_ssid;
   _pass = wifi_pass;
@@ -82,7 +86,7 @@ void MqttDevice::begin(const char* wifi_ssid, const char* wifi_pass,
     _mqttPass = mqtt_pass;
   }
 
-  if (willTopic) 
+  if (willTopic)
   {
     lastWillTopic = String(willTopic);
     lastWillPayload = willPayload ? String(willPayload) : String("");
@@ -114,33 +118,32 @@ String MqttDevice::getDeviceId()
   return device_id;
 }
 
-
 // ---------------------- WiFi ----------------------
 bool MqttDevice::wifiConnectOnce()
 {
   log("Starting WiFi connect to '%s' ...", _ssid.c_str());
-  
+
 #if defined(ESP8266) || defined(ESP32)
   WiFi.disconnect(true, true);
 #else
   WiFi.disconnect(true);
 #endif
-  
+
   delay(200);
   WiFi.begin(_ssid.c_str(), _pass.c_str());
   unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) 
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000)
   {
     delay(200);
     Serial.print(".");
   }
 
-  if (WiFi.status() == WL_CONNECTED) 
+  if (WiFi.status() == WL_CONNECTED)
   {
     log("WiFi connected: %s", WiFi.localIP().toString().c_str());
     return true;
-  } 
-  else 
+  }
+  else
   {
     log("WiFi not connected after timeout");
     return false;
@@ -162,115 +165,134 @@ bool MqttDevice::ensureWiFi()
 
   lastWiFiAttempt = now;
   log("ensureWiFi: trying reconnect (delay %lu ms)", wifiRetryDelay);
-  
+
 #if defined(ESP32) || defined(ESP8266)
-  if (WiFi.status() == WL_DISCONNECTED) 
+  if (WiFi.status() == WL_DISCONNECTED)
   {
     WiFi.reconnect();
   }
-  else 
+  else
   {
     WiFi.disconnect();
     delay(200);
     WiFi.begin(_ssid.c_str(), _pass.c_str());
   }
 #else
-  WiFi.disconnect(true); 
+  WiFi.disconnect(true);
   delay(200);
   WiFi.begin(_ssid.c_str(), _pass.c_str());
 #endif
-  
+
   wifiRetryDelay = min(maxBackoff, wifiRetryDelay * 2);
   return (WiFi.status() == WL_CONNECTED);
 }
 
 // ---------------------- MQTT helpers ----------------------
-void MqttDevice::globalMqttCallback(char* topic, byte* payload, unsigned int length)
+void MqttDevice::globalMqttCallback(char *topic, byte *payload, unsigned int length)
 {
-  if (instance) 
+  if (instance)
   {
     instance->handleMessage(topic, payload, length);
   }
 }
 
-void MqttDevice::handleMessage(const char* topic, byte* payload, unsigned int length)
+void MqttDevice::handleMessage(const char *topic, byte *payload, unsigned int length)
 {
   lastMQTTActivity = millis();
+  String strTopic = String(topic);
+  bool messageHandled = false;
+
+  // 1. Callbacks Binárias (Prioridade Máxima)
+  for (auto &cb : binaryCallbacks)
+  {
+    if (strTopic == cb.topic)
+    {
+      cb.fn(topic, payload, length);
+      messageHandled = true;
+    }
+  }
+
+  // Se a mensagem foi tratada como binária, não continua para texto ou JSON.
+  if (messageHandled)
+  {
+    return;
+  }
 
   // O buffer para Callbacks de Texto permanece para compatibilidade
   char buf[length + 1];
   memcpy(buf, payload, length);
   buf[length] = '\0';
-  String strTopic = String(topic);
 
-  // 1. Callbacks de Texto
-  for (auto &cb : textCallbacks) 
+  // 2. Callbacks de Texto
+  for (auto &cb : textCallbacks)
   {
-    if (strTopic == cb.topic) 
+    if (strTopic == cb.topic)
     {
       cb.fn(topic, buf);
+      // Não definir messageHandled = true aqui, pois JSON e Texto podem ser subscritos no mesmo tópico
+      // para suportar fallback (embora idealmente o utilizador não o faça).
     }
   }
 
+  // 3. Callbacks JSON (incluindo Request/Response)
   bool anyJson = false;
-  // Verifica se existe alguma subscrição JSON, incluindo respostas dinâmicas
   for (auto &cb : jsonCallbacks)
   {
     if (strTopic == cb.topic)
     {
-      anyJson = true; break; 
+      anyJson = true;
+      break;
     }
   }
 
-  if (anyJson) 
+  if (anyJson)
   {
     JsonDocument doc;
     DeserializationError err = deserializeMsgPack(doc, payload, length);
 
-    if (err) 
+    if (err)
     {
       log("MessagePack parse error on topic %s (%s). Trying JSON (text) fallback.", topic, err.c_str());
       err = deserializeJson(doc, buf);
     }
 
-    if (!err) 
+    if (!err)
     {
-      for (auto it = jsonCallbacks.begin(); it != jsonCallbacks.end(); ) 
+      for (auto it = jsonCallbacks.begin(); it != jsonCallbacks.end();)
       {
-        if (strTopic == it->topic) 
+        if (strTopic == it->topic)
         {
           it->fn(topic, doc);
 
           bool isPendingResponse = false;
-          for (auto &req : pendingRequests) 
+          for (auto &req : pendingRequests)
           {
-            if (strTopic == req.responseTopic) 
+            if (strTopic == req.responseTopic)
             {
               req.completed = true;
               isPendingResponse = true;
               break;
             }
           }
-          
-          if (isPendingResponse) 
+
+          if (isPendingResponse)
           {
             log("Response received on %s. Callback removed.", strTopic.c_str());
             it = jsonCallbacks.erase(it); // Remove a callback DINÂMICA
           }
-          else 
+          else
           {
             ++it; // Callback estática (onJson) não é removida
           }
-        } 
-        else 
+        }
+        else
         {
           ++it;
         }
       }
-    } 
-    else 
+    }
+    else
     {
-      // Erro final (depois de tentar ambos os formatos)
       log("Final JSON parse error on topic %s (%s) after trying MessagePack and JSON text.", topic, err.c_str());
     }
   }
@@ -280,14 +302,14 @@ void MqttDevice::handleMessage(const char* topic, byte* payload, unsigned int le
 
 bool MqttDevice::reconnect()
 {
-  if (!ensureWiFi()) 
+  if (!ensureWiFi())
   {
     log("reconnect: no WiFi");
     return false;
   }
 
   unsigned long now = millis();
-  if (now - lastReconnectAttempt < mqttRetryDelay) 
+  if (now - lastReconnectAttempt < mqttRetryDelay)
   {
     return false;
   }
@@ -301,52 +323,55 @@ bool MqttDevice::reconnect()
   log("Trying MQTT connect as '%s' ...", clientId.c_str());
 
   // Lógica de conexão (mantida)
-  if (_mqttUser.length() || _mqttPass.length()) 
+  if (_mqttUser.length() || _mqttPass.length())
   {
-    if (lastWillTopic.length()) 
+    if (lastWillTopic.length())
     {
       ok = client.connect(clientId.c_str(), _mqttUser.c_str(), _mqttPass.c_str(),
-                         lastWillTopic.c_str(), lastWillQos, lastWillRetain,
-                         lastWillPayload.c_str());
-    } 
-    else 
-    {
-      ok = client.connect(clientId.c_str(), _mqttUser.c_str(), _mqttPass.c_str(),
-                         statusTopic.c_str(), 0, true, "offline");
+                          lastWillTopic.c_str(), lastWillQos, lastWillRetain,
+                          lastWillPayload.c_str());
     }
-
-  } 
-  else 
+    else
+    {
+      ok = client.connect(clientId.c_str(), _mqttUser.c_str(), _mqttPass.c_str(),
+                          statusTopic.c_str(), 0, true, "offline");
+    }
+  }
+  else
   {
-    if (lastWillTopic.length()) 
+    if (lastWillTopic.length())
     {
       ok = client.connect(clientId.c_str(), nullptr, nullptr,
-                         lastWillTopic.c_str(), lastWillQos, lastWillRetain,
-                         lastWillPayload.c_str());
-    } 
-    else 
+                          lastWillTopic.c_str(), lastWillQos, lastWillRetain,
+                          lastWillPayload.c_str());
+    }
+    else
     {
       ok = client.connect(clientId.c_str(), nullptr, nullptr, statusTopic.c_str(), 0, true, "offline");
     }
   }
 
-  if (ok) 
+  if (ok)
   {
     log("MQTT connected!");
     mqttRetryDelay = mqttRetryBase;
     client.publish(statusTopic.c_str(), "online", true);
-    for (auto &cb : textCallbacks) client.subscribe(cb.topic.c_str());
-    for (auto &cb : jsonCallbacks) client.subscribe(cb.topic.c_str());
+    for (auto &cb : textCallbacks)
+      client.subscribe(cb.topic.c_str());
+    for (auto &cb : jsonCallbacks)
+      client.subscribe(cb.topic.c_str());
+    for (auto &cb : binaryCallbacks)
+      client.subscribe(cb.topic.c_str());
     lastMQTTActivity = millis();
-    
-    if (connectionCallback) 
+
+    if (connectionCallback)
     {
-      connectionCallback(true); 
+      connectionCallback(true);
     }
-    
+
     return true;
-  } 
-  else 
+  }
+  else
   {
     int st = client.state();
     log("MQTT connect failed, state=%d. Backoff=%lu", st, mqttRetryDelay);
@@ -360,7 +385,7 @@ void MqttDevice::forceReconnect()
   log("forceReconnect: disconnecting client and forcing immediate reconnect");
   client.disconnect();
 
-  if (connectionCallback) 
+  if (connectionCallback)
   {
     connectionCallback(false);
   }
@@ -376,106 +401,143 @@ void MqttDevice::onConnectionChange(MqttConnectionCallback cb)
 
 // ---------------------- Publish / Subscribe----------------------
 
-void MqttDevice::publish(const char* fullTopic, const char* data, bool retain)
+void MqttDevice::publish(const char *fullTopic, const char *data, bool retain)
 {
-  if (!client.connected()) 
+  if (!client.connected())
   {
     log("publish failed: MQTT not connected");
     return;
   }
 
-  client.publish(fullTopic, (const uint8_t*)data, strlen(data), retain);
+  client.publish(fullTopic, (const uint8_t *)data, strlen(data), retain);
   lastMQTTActivity = millis();
 }
 
-void MqttDevice::publishJson(const char* fullTopic, const JsonDocument& doc, bool retain)
+void MqttDevice::publishJson(const char *fullTopic, const JsonDocument &doc, bool retain)
 {
-  if (!client.connected()) 
+  if (!client.connected())
   {
     log("publishJson failed: MQTT not connected");
     return;
   }
-    
+
   const size_t MAX_PAYLOAD_SIZE = 1024;
   uint8_t buffer[MAX_PAYLOAD_SIZE];
-    
+
   size_t len = serializeMsgPack(doc, buffer, MAX_PAYLOAD_SIZE);
 
-  if (len > 0 && len <= MAX_PAYLOAD_SIZE) 
+  if (len > 0 && len <= MAX_PAYLOAD_SIZE)
   {
     client.publish(fullTopic, buffer, len, retain);
     lastMQTTActivity = millis();
-  } 
-  else 
+  }
+  else
   {
     log("Error serializing MessagePack (len=%u) in publishJson", len);
   }
 }
 
+void MqttDevice::publishBinary(const char *fullTopic, const uint8_t *data, unsigned int length, bool retain)
+{
+  if (!client.connected())
+  {
+    log("publishBinary failed: MQTT not connected");
+    return;
+  }
+
+  // Usar a sobrecarga de publish do PubSubClient para arrays de bytes
+  client.publish(fullTopic, data, length, retain);
+  lastMQTTActivity = millis();
+}
+
 // ---------------------- 2. publishSubTopic/publishJsonSubTopic (NOVO NOME PARA O PADRÃO) ----------------------
 
-String MqttDevice::buildFullTopic(const char* subTopic)
+String MqttDevice::buildFullTopic(const char *subTopic)
 {
-  if (strncmp(subTopic, "devices/", 8) == 0) 
+  if (strncmp(subTopic, "devices/", 8) == 0)
   {
     return String(subTopic);
   }
   return "devices/" + device_id + "/" + String(subTopic);
 }
 
-void MqttDevice::publishSubTopic(const char* subTopic, const char* data, bool retain)
+void MqttDevice::publishSubTopic(const char *subTopic, const char *data, bool retain)
 {
-  if (!client.connected()) 
+  if (!client.connected())
   {
     log("publishSubTopic failed: MQTT not connected");
     return;
   }
   String topic = buildFullTopic(subTopic);
-  
-  client.publish(topic.c_str(), (const uint8_t*)data, strlen(data), retain);
+
+  client.publish(topic.c_str(), (const uint8_t *)data, strlen(data), retain);
   lastMQTTActivity = millis();
 }
 
-void MqttDevice::publishJsonSubTopic(const char* subTopic, const JsonDocument& doc, bool retain)
+void MqttDevice::publishJsonSubTopic(const char *subTopic, const JsonDocument &doc, bool retain)
 {
-  if (!client.connected()) 
+  if (!client.connected())
   {
     log("publishJsonSubTopic failed: MQTT not connected");
     return;
   }
   String topic = buildFullTopic(subTopic);
-  
-  const size_t MAX_PAYLOAD_SIZE = 1024; 
+
+  const size_t MAX_PAYLOAD_SIZE = 1024;
   uint8_t buffer[MAX_PAYLOAD_SIZE];
-  
+
   size_t len = serializeMsgPack(doc, buffer, MAX_PAYLOAD_SIZE);
 
-  if (len > 0 && len <= MAX_PAYLOAD_SIZE) 
+  if (len > 0 && len <= MAX_PAYLOAD_SIZE)
   {
     client.publish(topic.c_str(), buffer, len, retain);
     lastMQTTActivity = millis();
-  } 
-  else 
+  }
+  else
   {
     log("Error serializing MessagePack (len=%u) in publishJsonSubTopic", len);
   }
 }
 
-void MqttDevice::on(const char* subTopic, std::function<void(const char* topic, const char* payload)> call_back)
+void MqttDevice::publishBinarySubTopic(const char *subTopic, const uint8_t *data, unsigned int length, bool retain)
+{
+  if (!client.connected())
+  {
+    log("publishBinarySubTopic failed: MQTT not connected");
+    return;
+  }
+  String topic = buildFullTopic(subTopic);
+
+  // Usar a sobrecarga de publish do PubSubClient para arrays de bytes
+  client.publish(topic.c_str(), data, length, retain);
+  lastMQTTActivity = millis();
+}
+
+void MqttDevice::on(const char *subTopic, std::function<void(const char *topic, const char *payload)> call_back)
 {
   String topic = buildFullTopic(subTopic);
   textCallbacks.push_back({topic, call_back});
-  if (client.connected()) 
+  if (client.connected())
   {
     client.subscribe(topic.c_str());
   }
 }
 
-void MqttDevice::onJson(const char* subTopic, std::function<void(const char* topic, const JsonDocument& doc)> call_back)
+void MqttDevice::onJson(const char *subTopic, std::function<void(const char *topic, const JsonDocument &doc)> call_back)
 {
   String topic = buildFullTopic(subTopic);
   jsonCallbacks.push_back({topic, call_back});
-  if (client.connected()) 
+  if (client.connected())
+  {
+    client.subscribe(topic.c_str());
+  }
+}
+
+void MqttDevice::onBinary(const char *subTopic, std::function<void(const char *topic, const uint8_t *payload, unsigned int length)> call_back)
+{
+  String topic = buildFullTopic(subTopic);
+  binaryCallbacks.push_back({topic, call_back});
+  if (client.connected())
   {
     client.subscribe(topic.c_str());
   }
@@ -483,60 +545,62 @@ void MqttDevice::onJson(const char* subTopic, std::function<void(const char* top
 
 // ---------------------- Request / Response (Com Timeout) ----------------------
 
-void MqttDevice::request(const char* targetSubTopic, const JsonDocument& requestDoc,
-                         std::function<void(const char* topic, const JsonDocument& doc)> response_callback,
+void MqttDevice::request(const char *targetSubTopic, const JsonDocument &requestDoc,
+                         std::function<void(const char *topic, const JsonDocument &doc)> response_callback,
                          unsigned long timeoutMs)
 {
-  if (!client.connected()) 
+  if (!client.connected())
   {
     log("request failed: MQTT not connected");
     return;
   }
 
-    // 1. Gera um ID de Pedido único
+  // 1. Gera um ID de Pedido único
   String requestId = String(millis(), HEX);
-  requestId += String(random(0xFFFF), HEX); 
+  requestId += String(random(0xFFFF), HEX);
 
-    // 2. Cria o subtópico de resposta
+  // 2. Cria o subtópico de resposta
   String responseSubTopic = "response/" + requestId;
   String fullResponseTopic = buildFullTopic(responseSubTopic.c_str());
 
-    // 3. Prepara a callback e armazena o estado do pedido
-    // A callback é adicionada à lista JSON e será removida em handleMessage ou checkPendingRequests
-  jsonCallbacks.push_back({fullResponseTopic, response_callback}); 
-    
-    // Armazenar o estado para a gestão de timeouts
+  // 3. Prepara a callback e armazena o estado do pedido
+  // A callback é adicionada à lista JSON e será removida em handleMessage ou checkPendingRequests
+  jsonCallbacks.push_back({fullResponseTopic, response_callback});
+
+  // Armazenar o estado para a gestão de timeouts
   pendingRequests.push_back({requestId, fullResponseTopic, millis(), timeoutMs, false});
 
-  if (client.connected()) client.subscribe(fullResponseTopic.c_str());
+  if (client.connected())
+    client.subscribe(fullResponseTopic.c_str());
 
-    // 4. Clona e modifica o documento de pedido
-  JsonDocument payloadDoc; 
-  payloadDoc.set(requestDoc); 
+  // 4. Clona e modifica o documento de pedido
+  JsonDocument payloadDoc;
+  payloadDoc.set(requestDoc);
   payloadDoc["response_topic"] = fullResponseTopic;
 
-    // 5. Publica o pedido
+  // 5. Publica o pedido
   String targetTopic = buildFullTopic(targetSubTopic);
-    
-    // **********************************************
-    // CORRIGIDO: Serializar para MessagePack (binário)
-    // **********************************************
-  const size_t MAX_REQ_PAYLOAD_SIZE = 512; 
+
+  // **********************************************
+  // CORRIGIDO: Serializar para MessagePack (binário)
+  // **********************************************
+  const size_t MAX_REQ_PAYLOAD_SIZE = 512;
   uint8_t buffer[MAX_REQ_PAYLOAD_SIZE];
-    
+
   size_t len = serializeMsgPack(payloadDoc, buffer, MAX_REQ_PAYLOAD_SIZE);
-    
-  if (len > 0 && len <= MAX_REQ_PAYLOAD_SIZE) {
-      // Publicação Request é sempre QoS 0
+
+  if (len > 0 && len <= MAX_REQ_PAYLOAD_SIZE)
+  {
+    // Publicação Request é sempre QoS 0
     client.publish(targetTopic.c_str(), buffer, len, false);
-  } 
-  else 
+  }
+  else
   {
     log("Error serializing MessagePack (len=%u) in request", len);
   }
-    
-  log("Request sent to '%s'. Expecting response on '%s' (Timeout: %lu ms)", 
-        targetTopic.c_str(), fullResponseTopic.c_str(), timeoutMs);
+
+  log("Request sent to '%s'. Expecting response on '%s' (Timeout: %lu ms)",
+      targetTopic.c_str(), fullResponseTopic.c_str(), timeoutMs);
 
   lastMQTTActivity = millis();
 }
@@ -545,36 +609,36 @@ void MqttDevice::request(const char* targetSubTopic, const JsonDocument& request
 void MqttDevice::checkPendingRequests()
 {
   unsigned long now = millis();
-  for (auto it = pendingRequests.begin(); it != pendingRequests.end(); ) 
+  for (auto it = pendingRequests.begin(); it != pendingRequests.end();)
   {
     bool timedOut = (now - it->timestamp > it->timeoutMs);
     // Se o pedido foi concluído (pela resposta) OU se excedeu o timeout
-    if (it->completed || timedOut) 
+    if (it->completed || timedOut)
     {
       // 1. Log de timeout e limpeza de callback, se necessário
-      if (timedOut && !it->completed) 
+      if (timedOut && !it->completed)
       {
         log("Request timeout on topic %s. Callback removed.", it->responseTopic.c_str());
-                
+
         // Se houve timeout, a callback DINÂMICA ainda está em 'jsonCallbacks' e deve ser removida.
-        for (auto json_it = jsonCallbacks.begin(); json_it != jsonCallbacks.end(); ++json_it) 
+        for (auto json_it = jsonCallbacks.begin(); json_it != jsonCallbacks.end(); ++json_it)
         {
-          if (json_it->topic == it->responseTopic) 
+          if (json_it->topic == it->responseTopic)
           {
             jsonCallbacks.erase(json_it);
-              break;
+            break;
           }
         }
       }
 
-      if (client.connected()) 
+      if (client.connected())
       {
         client.unsubscribe(it->responseTopic.c_str());
       }
       // 3. Remover o estado do pedido (RequestState)
       it = pendingRequests.erase(it);
-    } 
-    else 
+    }
+    else
     {
       ++it;
     }
@@ -586,26 +650,26 @@ void MqttDevice::loop()
 {
   // 1. Manter Wi-Fi
   ensureWiFi();
-  
+
   // 2. Manter MQTT
-  if (!client.connected()) 
-  { 
-    reconnect(); 
-    return; 
+  if (!client.connected())
+  {
+    reconnect();
+    return;
   }
-  
+
   // 3. Processar mensagens
   client.loop();
 
   // 4. Gestão de recursos (limpeza de pedidos/timeouts)
   checkPendingRequests();
-  
+
   // 5. Watchdog MQTT
-  if (millis() - lastMQTTActivity > mqttWatchdog) 
+  if (millis() - lastMQTTActivity > mqttWatchdog)
   {
     log("MQTT watchdog triggered. Forcing reconnect.");
     // Notificar a aplicação da desconexão antes de forçar
-    if (connectionCallback) 
+    if (connectionCallback)
     {
       connectionCallback(false);
     }
