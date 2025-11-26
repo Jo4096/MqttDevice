@@ -513,9 +513,9 @@ void MqttDevice::publishBinarySubTopic(const char *subTopic, const uint8_t *data
   lastMQTTActivity = millis();
 }
 
-void MqttDevice::on(const char *subTopic, std::function<void(const char *topic, const char *payload)> call_back)
+void MqttDevice::on(const char *Topic, std::function<void(const char *topic, const char *payload)> call_back, bool useDeviceIdPrefix)
 {
-  String topic = buildFullTopic(subTopic);
+  String topic = useDeviceIdPrefix ? buildFullTopic(Topic) : Topic;
   textCallbacks.push_back({topic, call_back});
   if (client.connected())
   {
@@ -523,9 +523,9 @@ void MqttDevice::on(const char *subTopic, std::function<void(const char *topic, 
   }
 }
 
-void MqttDevice::onJson(const char *subTopic, std::function<void(const char *topic, const JsonDocument &doc)> call_back)
+void MqttDevice::onJson(const char *Topic, std::function<void(const char *topic, const JsonDocument &doc)> call_back, bool useDeviceIdPrefix)
 {
-  String topic = buildFullTopic(subTopic);
+  String topic = useDeviceIdPrefix ? buildFullTopic(Topic) : Topic;
   jsonCallbacks.push_back({topic, call_back});
   if (client.connected())
   {
@@ -533,9 +533,9 @@ void MqttDevice::onJson(const char *subTopic, std::function<void(const char *top
   }
 }
 
-void MqttDevice::onBinary(const char *subTopic, std::function<void(const char *topic, const uint8_t *payload, unsigned int length)> call_back)
+void MqttDevice::onBinary(const char *Topic, std::function<void(const char *topic, const uint8_t *payload, unsigned int length)> call_back, bool useDeviceIdPrefix)
 {
-  String topic = buildFullTopic(subTopic);
+  String topic = useDeviceIdPrefix ? buildFullTopic(Topic) : Topic;
   binaryCallbacks.push_back({topic, call_back});
   if (client.connected())
   {
@@ -659,7 +659,17 @@ void MqttDevice::loop()
   }
 
   // 3. Processar mensagens
-  client.loop();
+  if (!client.loop())
+  {
+    log("MQTT client.loop() failed. Forcing reconnect.");
+    // Notificar a aplicação da desconexão antes de forçar
+    if (connectionCallback)
+    {
+      connectionCallback(false); // Notifica o utilizador da desconexão
+    }
+    client.disconnect(); // Garante que o estado interno do PubSubClient é limpo
+    return;              // Sai e permite que o próximo loop() execute reconnect() imediatamente
+  }
 
   // 4. Gestão de recursos (limpeza de pedidos/timeouts)
   checkPendingRequests();
@@ -675,4 +685,63 @@ void MqttDevice::loop()
     }
     client.disconnect();
   }
+}
+
+bool MqttDevice::unsubscribe(const char *subTopic)
+{
+  String fullTopic = buildFullTopic(subTopic);
+  bool unsubscribed = false;
+
+  if (client.connected())
+  {
+    client.unsubscribe(fullTopic.c_str());
+    log("Unsubscribed from topic: %s", fullTopic.c_str());
+    unsubscribed = true;
+  }
+  else
+  {
+    log("MQTT client not connected, skipping broker unsubscribe for %s.", fullTopic.c_str());
+    unsubscribed = true;
+  }
+
+  for (auto it = textCallbacks.begin(); it != textCallbacks.end();)
+  {
+    if (it->topic == fullTopic)
+    {
+      it = textCallbacks.erase(it);
+      log("Removed Text callback for topic: %s", fullTopic.c_str());
+    }
+    else
+    {
+      ++it;
+    }
+  }
+
+  for (auto it = jsonCallbacks.begin(); it != jsonCallbacks.end();)
+  {
+    if (it->topic == fullTopic)
+    {
+      it = jsonCallbacks.erase(it);
+      log("Removed JSON callback for topic: %s", fullTopic.c_str());
+    }
+    else
+    {
+      ++it;
+    }
+  }
+
+  for (auto it = binaryCallbacks.begin(); it != binaryCallbacks.end();)
+  {
+    if (it->topic == fullTopic)
+    {
+      it = binaryCallbacks.erase(it);
+      log("Removed Binary callback for topic: %s", fullTopic.c_str());
+    }
+    else
+    {
+      ++it;
+    }
+  }
+
+  return unsubscribed;
 }
