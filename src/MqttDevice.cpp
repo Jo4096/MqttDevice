@@ -8,10 +8,13 @@ MqttDevice::MqttDevice() : MqttDevice("") {}
 MqttDevice::MqttDevice(String id)
 {
   if (id == "")
+  {
     this->device_id = generateUniqueId();
+  }
   else
+  {
     this->device_id = id;
-
+  }
   this->lastReconnectAttempt = 0;
   this->lastWiFiAttempt = 0;
   this->lastMQTTActivity = 0;
@@ -24,7 +27,9 @@ MqttDevice::MqttDevice(String id)
 void MqttDevice::log(const char *fmt, ...)
 {
   if (!debug)
+  {
     return;
+  }
   char buf[256];
   va_list args;
   va_start(args, fmt);
@@ -202,7 +207,7 @@ void MqttDevice::handleMessage(const char *topic, byte *payload, unsigned int le
   String strTopic = String(topic);
   bool messageHandled = false;
 
-  // 1. Callbacks Binárias (Prioridade Máxima)
+  // Callbacks Binárias (Prioridade Máxima)
   for (auto &cb : binaryCallbacks)
   {
     if (strTopic == cb.topic)
@@ -223,7 +228,7 @@ void MqttDevice::handleMessage(const char *topic, byte *payload, unsigned int le
   memcpy(buf, payload, length);
   buf[length] = '\0';
 
-  // 2. Callbacks de Texto
+  // Callbacks de Texto
   for (auto &cb : textCallbacks)
   {
     if (strTopic == cb.topic)
@@ -234,7 +239,7 @@ void MqttDevice::handleMessage(const char *topic, byte *payload, unsigned int le
     }
   }
 
-  // 3. Callbacks JSON (incluindo Request/Response)
+  // Callbacks JSON (incluindo Request/Response)
   bool anyJson = false;
   for (auto &cb : jsonCallbacks)
   {
@@ -357,11 +362,18 @@ bool MqttDevice::reconnect()
     mqttRetryDelay = mqttRetryBase;
     client.publish(statusTopic.c_str(), "online", true);
     for (auto &cb : textCallbacks)
+    {
       client.subscribe(cb.topic.c_str());
+    }
     for (auto &cb : jsonCallbacks)
+    {
       client.subscribe(cb.topic.c_str());
+    }
     for (auto &cb : binaryCallbacks)
+    {
       client.subscribe(cb.topic.c_str());
+    }
+
     lastMQTTActivity = millis();
 
     if (connectionCallback)
@@ -481,6 +493,7 @@ void MqttDevice::publishJsonSubTopic(const char *subTopic, const JsonDocument &d
     log("publishJsonSubTopic failed: MQTT not connected");
     return;
   }
+
   String topic = buildFullTopic(subTopic);
 
   const size_t MAX_PAYLOAD_SIZE = 1024;
@@ -506,9 +519,9 @@ void MqttDevice::publishBinarySubTopic(const char *subTopic, const uint8_t *data
     log("publishBinarySubTopic failed: MQTT not connected");
     return;
   }
+
   String topic = buildFullTopic(subTopic);
 
-  // Usar a sobrecarga de publish do PubSubClient para arrays de bytes
   client.publish(topic.c_str(), data, length, retain);
   lastMQTTActivity = millis();
 }
@@ -555,15 +568,15 @@ void MqttDevice::request(const char *targetSubTopic, const JsonDocument &request
     return;
   }
 
-  // 1. Gera um ID de Pedido único
+  // Gera um ID de Pedido único
   String requestId = String(millis(), HEX);
   requestId += String(random(0xFFFF), HEX);
 
-  // 2. Cria o subtópico de resposta
+  // Cria o subtópico de resposta
   String responseSubTopic = "response/" + requestId;
   String fullResponseTopic = buildFullTopic(responseSubTopic.c_str());
 
-  // 3. Prepara a callback e armazena o estado do pedido
+  // Prepara a callback e armazena o estado do pedido
   // A callback é adicionada à lista JSON e será removida em handleMessage ou checkPendingRequests
   jsonCallbacks.push_back({fullResponseTopic, response_callback});
 
@@ -573,17 +586,14 @@ void MqttDevice::request(const char *targetSubTopic, const JsonDocument &request
   if (client.connected())
     client.subscribe(fullResponseTopic.c_str());
 
-  // 4. Clona e modifica o documento de pedido
+  // Clona e modifica o documento de pedido
   JsonDocument payloadDoc;
   payloadDoc.set(requestDoc);
   payloadDoc["response_topic"] = fullResponseTopic;
 
-  // 5. Publica o pedido
+  // Publica o pedido
   String targetTopic = buildFullTopic(targetSubTopic);
 
-  // **********************************************
-  // CORRIGIDO: Serializar para MessagePack (binário)
-  // **********************************************
   const size_t MAX_REQ_PAYLOAD_SIZE = 512;
   uint8_t buffer[MAX_REQ_PAYLOAD_SIZE];
 
@@ -591,7 +601,6 @@ void MqttDevice::request(const char *targetSubTopic, const JsonDocument &request
 
   if (len > 0 && len <= MAX_REQ_PAYLOAD_SIZE)
   {
-    // Publicação Request é sempre QoS 0
     client.publish(targetTopic.c_str(), buffer, len, false);
   }
   else
@@ -615,7 +624,7 @@ void MqttDevice::checkPendingRequests()
     // Se o pedido foi concluído (pela resposta) OU se excedeu o timeout
     if (it->completed || timedOut)
     {
-      // 1. Log de timeout e limpeza de callback, se necessário
+      // Log de timeout e limpeza de callback, se necessário
       if (timedOut && !it->completed)
       {
         log("Request timeout on topic %s. Callback removed.", it->responseTopic.c_str());
@@ -635,7 +644,7 @@ void MqttDevice::checkPendingRequests()
       {
         client.unsubscribe(it->responseTopic.c_str());
       }
-      // 3. Remover o estado do pedido (RequestState)
+      // Remover o estado do pedido
       it = pendingRequests.erase(it);
     }
     else
@@ -648,17 +657,17 @@ void MqttDevice::checkPendingRequests()
 // ---------------------- Loop ----------------------
 void MqttDevice::loop()
 {
-  // 1. Manter Wi-Fi
+  // Manter Wi-Fi
   ensureWiFi();
 
-  // 2. Manter MQTT
+  // Manter MQTT
   if (!client.connected())
   {
     reconnect();
     return;
   }
 
-  // 3. Processar mensagens
+  // Processar mensagens
   if (!client.loop())
   {
     log("MQTT client.loop() failed. Forcing reconnect.");
@@ -671,10 +680,10 @@ void MqttDevice::loop()
     return;              // Sai e permite que o próximo loop() execute reconnect() imediatamente
   }
 
-  // 4. Gestão de recursos (limpeza de pedidos/timeouts)
+  // Gestão de recursos (limpeza de pedidos/timeouts)
   checkPendingRequests();
 
-  // 5. Watchdog MQTT
+  // Watchdog MQTT
   if (millis() - lastMQTTActivity > mqttWatchdog)
   {
     log("MQTT watchdog triggered. Forcing reconnect.");
