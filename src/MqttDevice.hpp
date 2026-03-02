@@ -62,6 +62,9 @@ public:
   // Unsubscribe
   bool unsubscribe(const char *subTopic);
 
+  // returns if it is connected
+  bool connected();
+
 private:
   // Device identity
   String device_id;
@@ -127,14 +130,14 @@ private:
   std::vector<JsonCallback> jsonCallbacks;
   std::vector<BinaryCallback> binaryCallbacks;
   std::vector<RequestState> pendingRequests;
-  MqttConnectionCallback connectionCallback = nullptr; // Callback de conexão
+  MqttConnectionCallback connectionCallback = nullptr;
 
   // Internals
   static MqttDevice *instance;
   static void globalMqttCallback(char *topic, byte *payload, unsigned int length);
   void handleMessage(const char *topic, byte *payload, unsigned int length);
 
-  void checkPendingRequests(); // Novo: Para gestão de timeouts e limpeza
+  void checkPendingRequests();
 
   bool wifiConnectOnce();
   bool ensureWiFi();
@@ -147,6 +150,10 @@ private:
   // debug
   bool debug = true;
   void log(const char *fmt, ...);
+
+  // para reconfigurções e isso
+  bool _initialized = false;
+
 };
 
 #endif
