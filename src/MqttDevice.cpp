@@ -71,17 +71,14 @@ void MqttDevice::begin(const char *wifi_ssid, const char *wifi_pass,
                        const char *mqtt_user, const char *mqtt_pass,
                        const char *willTopic, const char *willPayload, bool willRetain, int willQos, int mqttKeepAliveSeconds)
 {
-  if (_initialized) {
-    log("Reconfiguring MqttDevice... Disconnecting old sessions.");
-    _initialized = false;
-    
-    client.disconnect();
-    #if defined(ESP8266) || defined(ESP32)
-      WiFi.disconnect(true, true); 
-    #else
-      WiFi.disconnect(true);
-    #endif
-    delay(500);
+  if (_initialized) 
+  {
+    log("Reconfiguring MqttDevice... Scheduling reset.");
+    _needsReset = true;
+  } 
+  else 
+  {
+    _needsReset = true;
   }
 
   _ssid = wifi_ssid;
@@ -104,7 +101,7 @@ void MqttDevice::begin(const char *wifi_ssid, const char *wifi_pass,
   lastReconnectAttempt = 0;
   lastWiFiAttempt = 0;
   lastMQTTActivity = 0;
-  wifiRetryDelay = wifiRetryBase;
+  wifiRetryDelay = 0;
   mqttRetryDelay = mqttRetryBase;
 
   WiFi.mode(WIFI_STA);
@@ -112,7 +109,6 @@ void MqttDevice::begin(const char *wifi_ssid, const char *wifi_pass,
   WiFi.setAutoReconnect(true);
 #endif
 
-  // Configurar cliente MQTT
   client.setClient(wifi);
   client.setServer(_mqttHost.c_str(), _mqttPort);
   client.setCallback(MqttDevice::globalMqttCallback);
@@ -122,8 +118,6 @@ void MqttDevice::begin(const char *wifi_ssid, const char *wifi_pass,
 #if defined(ESP8266)
   wifi.setTimeout(2000);
 #endif
-
-  wifiConnectOnce();
 
   _initialized = true;
   log("Begin (re)configured: wifi SSID='%s', mqtt='%s:%d'", _ssid.c_str(), _mqttHost.c_str(), _mqttPort);
@@ -135,6 +129,7 @@ String MqttDevice::getDeviceId()
 }
 
 // ---------------------- WiFi ----------------------
+/*
 bool MqttDevice::wifiConnectOnce()
 {
   log("Starting WiFi connect to '%s' ...", _ssid.c_str());
@@ -165,6 +160,8 @@ bool MqttDevice::wifiConnectOnce()
     return false;
   }
 }
+*/
+
 
 bool MqttDevice::ensureWiFi()
 {
@@ -180,7 +177,7 @@ bool MqttDevice::ensureWiFi()
   }
 
   lastWiFiAttempt = now;
-  log("ensureWiFi: trying reconnect (delay %lu ms)", wifiRetryDelay);
+  log("ensureWiFi: trying connect/reconnect (delay %lu ms)", wifiRetryDelay);
 
 #if defined(ESP32) || defined(ESP8266)
   if (WiFi.status() == WL_DISCONNECTED)
@@ -190,17 +187,17 @@ bool MqttDevice::ensureWiFi()
   else
   {
     WiFi.disconnect();
-    delay(200);
     WiFi.begin(_ssid.c_str(), _pass.c_str());
   }
 #else
   WiFi.disconnect(true);
-  delay(200);
   WiFi.begin(_ssid.c_str(), _pass.c_str());
 #endif
 
-  wifiRetryDelay = min(maxBackoff, wifiRetryDelay * 2);
-  return (WiFi.status() == WL_CONNECTED);
+  if (wifiRetryDelay == 0) wifiRetryDelay = wifiRetryBase;
+  else wifiRetryDelay = min(maxBackoff, wifiRetryDelay * 2);
+
+  return false;
 }
 
 // ---------------------- MQTT helpers ----------------------
@@ -665,38 +662,50 @@ void MqttDevice::checkPendingRequests()
 void MqttDevice::loop()
 {
   if (!_initialized) return;
-  
-  // 1. Manter Wi-Fi
-  ensureWiFi();
+  unsigned long now = millis();
+  if (_needsReset) 
+  {
+    log("Executing scheduled disconnect/reset...");
+    client.disconnect();
+    #if defined(ESP8266) || defined(ESP32)
+      WiFi.disconnect(true, true); 
+    #else
+      WiFi.disconnect(true);
+    #endif
+    _needsReset = false;
+    
+    lastWiFiAttempt = now; 
+    wifiRetryDelay = 500; 
+    return;
+  }
 
-  // 2. Manter MQTT
+  if (!ensureWiFi()) 
+  {
+    return;
+  }
+
   if (!client.connected())
   {
     reconnect();
     return;
   }
 
-  // 3. Processar mensagens
   if (!client.loop())
   {
     log("MQTT client.loop() failed. Forcing reconnect.");
-    // Notificar a aplicação da desconexão antes de forçar
     if (connectionCallback)
     {
-      connectionCallback(false); // Notifica o utilizador da desconexão
+      connectionCallback(false);
     }
-    client.disconnect(); // Garante que o estado interno do PubSubClient é limpo
-    return;              // Sai e permite que o próximo loop() execute reconnect() imediatamente
+    client.disconnect(); 
+    return;              
   }
 
-  // 4. Gestão de recursos (limpeza de pedidos/timeouts)
   checkPendingRequests();
 
-  // 5. Watchdog MQTT
   if (millis() - lastMQTTActivity > mqttWatchdog)
   {
     log("MQTT watchdog triggered. Forcing reconnect.");
-    // Notificar a aplicação da desconexão antes de forçar
     if (connectionCallback)
     {
       connectionCallback(false);
@@ -767,4 +776,41 @@ bool MqttDevice::unsubscribe(const char *subTopic)
 bool MqttDevice::connected()
 {
   return client.connected();
+}
+
+
+void MqttDevice::setDeviceId(String newId)
+{
+  if (newId == "" || newId == this->device_id) return;
+
+  log("Changing Device ID from '%s' to '%s'", this->device_id.c_str(), newId.c_str());
+
+  String oldPrefix = "devices/" + this->device_id + "/";
+  String newPrefix = "devices/" + newId + "/";
+
+  if (client.connected()) 
+  {
+    for (auto &cb : textCallbacks) client.unsubscribe(cb.topic.c_str());
+    for (auto &cb : jsonCallbacks) client.unsubscribe(cb.topic.c_str());
+    for (auto &cb : binaryCallbacks) client.unsubscribe(cb.topic.c_str());
+    
+    String oldStatusTopic = "devices/" + this->device_id + "/status";
+    client.publish(oldStatusTopic.c_str(), "offline", true);
+  }
+
+  auto updateTopics = [&](String &topic) 
+  {
+    if (topic.startsWith(oldPrefix)) 
+    {
+      topic.replace(oldPrefix, newPrefix);
+    }
+  };
+
+  for (auto &cb : textCallbacks)   updateTopics(cb.topic);
+  for (auto &cb : jsonCallbacks)   updateTopics(cb.topic);
+  for (auto &cb : binaryCallbacks) updateTopics(cb.topic);
+
+  this->device_id = newId;
+
+  _needsReset = true; 
 }
