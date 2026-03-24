@@ -65,6 +65,9 @@ public:
   // returns if it is connected
   bool connected();
 
+  // New Id
+  void setDeviceId(String newId);
+
 private:
   // Device identity
   String device_id;
@@ -139,7 +142,7 @@ private:
 
   void checkPendingRequests();
 
-  bool wifiConnectOnce();
+  //bool wifiConnectOnce();
   bool ensureWiFi();
   bool reconnect();
   void forceReconnect();
@@ -153,7 +156,7 @@ private:
 
   // para reconfigurções e isso
   bool _initialized = false;
-
+  bool _needsReset = false;
 };
 
 #endif
